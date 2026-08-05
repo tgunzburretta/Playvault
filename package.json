@@ -1,0 +1,16 @@
+{
+  "name": "playvault-stripe-starter",
+  "version": "1.0.0",
+  "description": "Playvault Stripe subscriptions starter (Silver/Gold)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "setup-stripe": "node setup-playvault-stripe.js"
+  },
+  "author": "tgunzburretta",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "stripe": "^12.0.0"
+  }
+}
