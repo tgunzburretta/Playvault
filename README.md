@@ -1,9 +1,14 @@
 # Playvault Stripe starter
 
-This repo contains a minimal starter to manage seller subscription tiers (Silver/Gold) and to update seller fee rates via webhooks.
+This repo contains a starter to manage seller subscription tiers (Silver/Gold), flip seller
+fee rates via webhooks, and run Connect escrow for buyer-protected marketplace sales
+(hold funds on `checkout.session.completed`, refund via `/orders/:id/refund`).
 
 Files:
-- server.js — subscription starter and webhook handler (provided by you)
+- server.js — routes: subscriptions, portal, Connect onboarding, escrow checkout, refunds, webhook
+- db.js — in-memory store for seller fee rates, Connect account status, orders, processed webhook events (swap for a real DB before production)
+- logger.js — structured `logInfo`/`logError` plus an `alertOps` stub for paging/Slack
+- views.js — the HTML for `/` and `/done`
 - setup-playvault-stripe.js — script to create Playvault Silver/Gold products and prices and print price IDs
 - package.json — scripts and dependencies
 
@@ -35,7 +40,13 @@ Security
 - Never commit secret keys or .env files. Use environment variables or a secret manager.
 - The starter refuses to start on a live key (sk_live_). Switch keys only when ready to go to production.
 
+Escrow flow
+1. Seller onboards for payouts: `POST /connect/onboard` `{ "customerId": "cus_xxx" }` -> redirect the seller to the returned `url`. Stripe's `account.updated` webhook flips them to onboarded once `charges_enabled && details_submitted`.
+2. Buyer purchases: `POST /buy` `{ "sellerCustomerId": "cus_xxx", "amount": 1999, "description": "..." }` -> redirects to Checkout. On `checkout.session.completed` the webhook creates an escrowed order.
+3. Refund if needed: `POST /orders/:id/refund` refunds the payment intent and marks the order refunded.
+4. Look up an order: `GET /orders/:id`.
+
 Next steps
-- Replace the in-memory updateSellerFeeRate() with a real DB write.
-- Implement Connect escrow (if you need to hold marketplace funds) and payouts to connected accounts.
-- Add webhook signature verification, idempotency, retry/backoff and logging/alerting for production.
+- Replace db.js's in-memory Maps with a real DB write.
+- Add a release-to-seller step (Stripe Transfer) once the buyer confirms receipt — currently orders only move from escrow to refunded.
+- Wire logger.js's alertOps() into a real pager/Slack integration.
