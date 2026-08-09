@@ -1,0 +1,19 @@
+{
+  "name": "pmbrief",
+  "version": "0.1.0",
+  "description": "PMBrief — subscription AI-prompt library for product managers (Stripe + auth starter)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "setup-stripe": "node setup-pmbrief-stripe.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "express-session": "^1.17.3",
+    "helmet": "^7.1.0",
+    "stripe": "^12.0.0"
+  }
+}
