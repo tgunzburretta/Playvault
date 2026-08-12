@@ -1,0 +1,33 @@
+# Render Blueprint for PMBrief.
+# In the Render dashboard: New > Blueprint > connect this repo > set the
+# "render.yaml path" to pmbrief/render.yaml (the repo root has a different,
+# unrelated app in it, so this file deliberately isn't at the repo root).
+#
+# Render will prompt for every `sync: false` value before the first deploy —
+# have your Stripe test key and price IDs ready. STRIPE_WEBHOOK_SECRET comes
+# from a Stripe webhook endpoint you create AFTER the first deploy (see
+# README "Deploy to Render" section), so leave it blank on the first pass
+# and fill it in once you have a live URL.
+
+services:
+  - type: web
+    name: pmbrief
+    runtime: node
+    rootDir: pmbrief
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: CORE_PRICE_ID
+        sync: false
+      - key: PRO_PRICE_ID
+        sync: false
