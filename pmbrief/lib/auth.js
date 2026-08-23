@@ -16,7 +16,11 @@ function isValidEmail(email) {
 }
 
 function isValidPassword(password) {
-  return typeof password === "string" && password.length >= 10;
+  // Upper bound matters, not just style: bcrypt silently truncates at 72
+  // bytes, so an unbounded password would let two different long passwords
+  // (identical only in their first 72 bytes) both authenticate as the same
+  // account without either user knowing.
+  return typeof password === "string" && password.length >= 10 && password.length <= 72;
 }
 
 function newId() {
