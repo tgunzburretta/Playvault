@@ -86,15 +86,34 @@ on checkout not timing out.
 
 ## Security posture (what's already handled, and what isn't)
 
-Handled: password hashing (bcrypt, 12 rounds), httpOnly/sameSite session
-cookies, CSRF tokens on every form post, rate limiting on login/signup,
-`helmet` security headers, webhook signature verification, secrets read only
-from environment variables, refuses to boot on a live Stripe key or a weak
+Handled: password hashing (bcrypt, 12 rounds, length-capped to avoid
+bcrypt's silent 72-byte truncation), signed httpOnly/sameSite session
+cookies via `cookie-session` (no server-side session store — nothing to
+leak memory over time, nobody gets logged out just because the process
+restarted on a redeploy), CSRF tokens on every form post, rate limiting on
+login/signup, `helmet` security headers (CSP scoped to allow only Google
+Fonts as a third-party origin), webhook signature verification, checkout
+URLs derived from the actual request host (not hardcoded to localhost, so
+this doesn't break the moment it's deployed anywhere), a guard against a
+subscribed user accidentally starting a second stacked subscription,
+`invoice.payment_failed` handling so a declined card shows up as "payment
+failed" instead of silently staying fully active, secrets read only from
+environment variables, refuses to boot on a live Stripe key or a weak
 session secret.
 
-Not handled yet — do these before real users' money touches this:
+Trade-off worth knowing: because sessions live in a signed cookie instead
+of a server-side store, there's no way to force-log-out a specific session
+from the server (e.g. "log me out of my other devices") without rotating
+`SESSION_SECRET`, which logs out everyone. Fine for an MVP at this scale;
+revisit with a real session store if that becomes a real user request.
+
+Not handled yet — do these before scaling past an early cohort of users:
 - Swap the JSON file store for a real database with proper migrations.
 - Add email verification and a password-reset flow.
 - Put this behind HTTPS (a platform like Render/Fly/Railway does this for you).
 - Add structured logging/alerting on webhook failures and failed logins.
 - Load-test the rate limiter's thresholds for your actual traffic.
+- Turn `automatic_tax` back on in the Stripe Checkout Session call once
+  Stripe Tax is configured in the dashboard (business address, etc.) —
+  left off deliberately so first checkout doesn't fail on an unconfigured
+  account.

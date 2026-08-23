@@ -26,7 +26,7 @@
 
 const express = require("express");
 const helmet = require("helmet");
-const session = require("express-session");
+const cookieSession = require("cookie-session");
 const rateLimit = require("express-rate-limit");
 
 const store = require("./lib/store");
@@ -68,11 +68,28 @@ if (!CORE_PRICE_ID || !PRO_PRICE_ID) {
 const stripe = require("stripe")(STRIPE_SECRET_KEY);
 const app = express();
 const PORT_NUM = Number(PORT) || 4300;
-const BASE_URL = `http://localhost:${PORT_NUM}`;
 const isProd = NODE_ENV === "production";
 
+// Derived per-request, not hardcoded — a fixed localhost BASE_URL would send
+// every deployed user's Stripe redirect back to a URL that only exists on
+// the dev machine. `trust proxy` makes req.protocol honor Render's
+// X-Forwarded-Proto so this resolves to https in production.
+function baseUrl(req) {
+  return `${req.protocol}://${req.get("host")}`;
+}
+
 app.set("trust proxy", 1);
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        "font-src": ["'self'", "https://fonts.gstatic.com"],
+      },
+    },
+  })
+);
 
 // Stripe webhook needs the RAW body for signature verification, so it's
 // mounted before the JSON/urlencoded parsers, on its own path only.
@@ -107,6 +124,15 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
       if (user) store.updateUser(user.id, { subscriptionStatus: "canceled", subscriptionTier: null });
       break;
     }
+    case "invoice.payment_failed": {
+      // A failed card charge doesn't fire a subscription.updated event by
+      // itself — without this, a subscriber whose card was declined would
+      // keep full access with no signal to them or to you that billing is
+      // broken until Stripe eventually cancels the subscription outright.
+      const user = store.findByStripeCustomerId(obj.customer);
+      if (user) store.updateUser(user.id, { subscriptionStatus: "past_due" });
+      break;
+    }
     default:
       break;
   }
@@ -116,17 +142,18 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+// Signed, stateless cookie sessions — no server-side store, so nothing to
+// leak memory over time and nobody gets logged out just because Render
+// restarted the process on a redeploy. Session payload here is tiny
+// (a user id + a CSRF token), well within the 4KB cookie limit.
 app.use(
-  session({
-    secret: SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: isProd,
-      maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
-    },
+  cookieSession({
+    name: "pmbrief.sid",
+    keys: [SESSION_SECRET],
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProd,
+    maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
   })
 );
 
@@ -176,7 +203,8 @@ app.post("/login", authLimiter, requireCsrf, async (req, res) => {
 });
 
 app.post("/logout", (req, res) => {
-  req.session.destroy(() => res.redirect("/"));
+  req.session = null; // cookie-session has no server-side store to destroy
+  res.redirect("/");
 });
 
 // ── Library (gated) ─────────────────────────────────────────────────────────
@@ -188,15 +216,21 @@ app.get("/dashboard", requireLogin, (req, res) => {
 app.get("/subscribe/:tier", requireLogin, async (req, res) => {
   const priceId = req.params.tier === "pro" ? PRO_PRICE_ID : CORE_PRICE_ID;
   const user = currentUser(req);
+  // Already paying — send them to the portal instead of starting a second,
+  // stacked subscription against the same card.
+  if (user.subscriptionStatus === "active") return res.redirect("/dashboard");
   try {
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: user.stripeCustomerId || undefined,
       customer_email: user.stripeCustomerId ? undefined : user.email,
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${BASE_URL}/dashboard?msg=Subscribed! Welcome to PMBrief.`,
-      cancel_url: `${BASE_URL}/dashboard`,
-      automatic_tax: { enabled: true },
+      success_url: `${baseUrl(req)}/dashboard?msg=Subscribed! Welcome to PMBrief.`,
+      cancel_url: `${baseUrl(req)}/dashboard`,
+      // automatic_tax requires Stripe Tax to be configured (business address
+      // etc.) or Checkout Session creation fails outright — that would break
+      // every single checkout on a freshly created account. Turn this back
+      // on in the Stripe dashboard once Tax is set up, not before.
       metadata: { userId: user.id },
     });
     // Stripe creates the customer immediately for subscription-mode Checkout
@@ -216,7 +250,7 @@ app.post("/billing-portal", requireLogin, requireCsrf, async (req, res) => {
   try {
     const portal = await stripe.billingPortal.sessions.create({
       customer: user.stripeCustomerId,
-      return_url: `${BASE_URL}/dashboard`,
+      return_url: `${baseUrl(req)}/dashboard`,
     });
     res.redirect(303, portal.url);
   } catch (err) {
@@ -225,4 +259,4 @@ app.post("/billing-portal", requireLogin, requireCsrf, async (req, res) => {
   }
 });
 
-app.listen(PORT_NUM, () => console.log(`PMBrief running at ${BASE_URL}`));
+app.listen(PORT_NUM, () => console.log(`PMBrief running at http://localhost:${PORT_NUM}`));
